@@ -5,8 +5,10 @@
 ## 直接执行
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/你的用户名/你的仓库/main/install-socks5.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/tian66888/socks5-installer/main/install-socks5.sh | sudo bash
 ```
+
+脚本即使通过管道执行，也会直接从当前 SSH 终端读取菜单输入。请不要将它放在没有交互终端的后台任务中执行。
 
 脚本会依次询问监听模式、端口和用户名。端口直接回车使用 `1080`；用户名直接回车表示无认证，输入用户名后再输入密码即启用认证。
 
