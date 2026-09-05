@@ -97,7 +97,8 @@ trap 'rm -f "$TMP_CONFIG"' EXIT
   echo "logoutput: syslog"
   echo "internal: $INTERNAL_IFACE port = $PORT"
   echo "external: $INTERNAL_IFACE"
-  echo "method: $AUTH_METHOD"
+  # Dante calls the SOCKS authentication policy "socksmethod".
+  echo "socksmethod: $AUTH_METHOD"
   echo "user.privileged: root"
   echo "user.notprivileged: nobody"
   echo "clientmethod: none"
@@ -111,7 +112,13 @@ trap 'rm -f "$TMP_CONFIG"' EXIT
 install -o root -g root -m 600 "$TMP_CONFIG" "$CONFIG_FILE"
 
 systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
-systemctl restart "$SERVICE_NAME" || systemctl restart sockd || die "Dante 启动失败，请查看 journalctl -u $SERVICE_NAME。"
+if ! systemctl restart "$SERVICE_NAME"; then
+  systemctl restart sockd 2>/dev/null || {
+    systemctl status "$SERVICE_NAME" --no-pager >&2 || true
+    journalctl -u "$SERVICE_NAME" -n 40 --no-pager >&2 || true
+    die "Dante 启动失败。"
+  }
+fi
 
 if command -v firewall-cmd >/dev/null && systemctl is-active --quiet firewalld; then
   if [[ "$BIND_MODE" == 1 ]]; then
@@ -128,8 +135,17 @@ elif command -v iptables >/dev/null; then
   else iptables -C INPUT -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport "$PORT" -j ACCEPT; fi
 fi
 
-sleep 1
-ss -lnt "sport = :$PORT" | grep -q ":$PORT" || die "服务未监听端口 $PORT。"
+for _ in 1 2 3 4 5; do
+  if systemctl is-active --quiet "$SERVICE_NAME" || systemctl is-active --quiet sockd; then
+    if ss -lntH | awk -v port=":$PORT" '$4 ~ port "$" { found=1 } END { exit !found }'; then break; fi
+  fi
+  sleep 1
+done
+if ! ss -lntH | awk -v port=":$PORT" '$4 ~ port "$" { found=1 } END { exit !found }'; then
+  systemctl status "$SERVICE_NAME" --no-pager >&2 || true
+  journalctl -u "$SERVICE_NAME" -n 40 --no-pager >&2 || true
+  die "服务未监听端口 $PORT。"
+fi
 PUBLIC_IP="$(curl -4fsS --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
 if [[ "$AUTH_METHOD" == username ]]; then URI="socks5://${PROXY_USERNAME}:${PROXY_PASSWORD}@${PUBLIC_IP}:${PORT}"; else URI="socks5://${PUBLIC_IP}:${PORT}"; fi
 echo
