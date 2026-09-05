@@ -86,6 +86,7 @@ if [[ -n "$PROXY_USERNAME" ]]; then
 fi
 
 install_packages
+DANTED_BIN="$(command -v danted || command -v sockd)"
 
 INTERNAL_IFACE="$(ip -o route show default 2>/dev/null | awk 'NR==1 {print $5}')"
 [[ -n "$INTERNAL_IFACE" ]] || INTERNAL_IFACE="$(ip -o -4 addr show scope global | awk 'NR==1 {print $2}')"
@@ -102,13 +103,14 @@ trap 'rm -f "$TMP_CONFIG"' EXIT
   echo "user.privileged: root"
   echo "user.notprivileged: nobody"
   echo "clientmethod: none"
-  echo "client pass { from:"
-  for net in $ALLOWLIST; do echo "  $net"; done
-  echo "to: 0.0.0.0/0 }"
-  echo "proxy pass { from:"
-  for net in $ALLOWLIST; do echo "  $net"; done
-  echo "to: 0.0.0.0/0 command: connect }"
+  for net in $ALLOWLIST; do
+    echo "client pass { from: $net to: 0.0.0.0/0 }"
+    echo "proxy pass { from: $net to: 0.0.0.0/0 command: connect }"
+  done
 } > "$TMP_CONFIG"
+
+# -V verifies the configuration without starting the daemon.
+"$DANTED_BIN" -V -f "$TMP_CONFIG" || die "Dante 配置校验失败，未替换现有配置。"
 install -o root -g root -m 600 "$TMP_CONFIG" "$CONFIG_FILE"
 
 systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
